@@ -200,7 +200,8 @@ def format_event_response(
             f"Час нагадування: {format_remind_at(remind_at)}"
         )
     else:
-        response += build_reminder_question()
+    has_event_time = bool(parsed.get("time"))
+    response += build_reminder_question(has_event_time)
 
     return response
     if not remind_at:
