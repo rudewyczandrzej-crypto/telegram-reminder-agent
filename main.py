@@ -1045,20 +1045,20 @@ def main():
 
     init_db()
 
-        async def post_init(application):
-        await application.bot.set_my_commands(
-            [
-                BotCommand("start", "Запустити бота"),
-                BotCommand("today", "Події на сьогодні"),
-                BotCommand("week", "Події на 7 днів"),
-                BotCommand("events", "Всі події"),
-                BotCommand("reminders", "Нагадування"),
-                BotCommand("remind", "Швидке нагадування"),
-                BotCommand("delete", "Видалити подію"),
-                BotCommand("clear", "Очистити все"),
-                BotCommand("help", "Допомога"),
-            ]
-        )
+async def post_init(application):
+    await application.bot.set_my_commands(
+        [
+            BotCommand("start", "Запустити бота"),
+            BotCommand("today", "Події на сьогодні"),
+            BotCommand("week", "Події на 7 днів"),
+            BotCommand("events", "Всі події"),
+            BotCommand("reminders", "Нагадування"),
+            BotCommand("remind", "Швидке нагадування"),
+            BotCommand("delete", "Видалити подію"),
+            BotCommand("clear", "Очистити все"),
+            BotCommand("help", "Допомога"),
+        ]
+    )
 
 app = (
     ApplicationBuilder()
