@@ -209,13 +209,22 @@ def format_event_response(
     return remind_at.strftime("%Y-%m-%d %H:%M")
 
 
-def build_reminder_question() -> str:
+def build_reminder_question(has_event_time: bool = False) -> str:
+    if has_event_time:
+        return (
+            "\nКоли нагадати?\n"
+            "1. За день\n"
+            "2. В той самий день зранку\n"
+            "3. За годину\n"
+            "4. За 10 хвилин\n"
+            "5. Не нагадувати"
+        )
+
     return (
-        "\nКоли нагадати?\n"
+        "\nЯ бачу дату, але не бачу конкретної години події.\n"
+        "Тому можу нагадати тільки відносно дня:\n"
         "1. За день\n"
         "2. В той самий день зранку\n"
-        "3. За годину\n"
-        "4. За 10 хвилин\n"
         "5. Не нагадувати"
     )
 
