@@ -13,7 +13,35 @@ from telegram.ext import (
     filters,
 )
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+async def send_due_reminders(context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.now(ZoneInfo(TIMEZONE))
+    app = context.application
+
+    try:
+        reminders = list_due_reminders(now)
+
+        for reminder in reminders:
+            telegram_chat_id = reminder["telegram_chat_id"]
+            title = reminder["title"]
+            event_date = reminder["event_date"]
+            event_time = reminder["event_time"]
+
+            message = (
+                "🔔 Нагадування\n\n"
+                f"Подія: {title}\n"
+                f"Дата: {event_date or 'без дати'}\n"
+                f"Час: {event_time or 'без часу'}"
+            )
+
+            await app.bot.send_message(
+                chat_id=telegram_chat_id,
+                text=message,
+            )
+
+            mark_reminder_sent(reminder["reminder_id"])
+
+    except Exception:
+        logging.exception("Error while sending due reminders")
 
 from ai_parser import parse_event_from_text
 from database import (
