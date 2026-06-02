@@ -156,7 +156,11 @@ def reminder_type_to_text(reminder_type: str) -> str:
     }
 
     return mapping.get(reminder_type, reminder_type)
+def format_remind_at(remind_at: datetime | None) -> str:
+    if not remind_at:
+        return "без нагадування"
 
+    return remind_at.strftime("%Y-%m-%d %H:%M")
 
 def format_event_response(
     parsed: dict,
