@@ -153,7 +153,56 @@ def reminder_type_to_text(reminder_type: str) -> str:
     return mapping.get(reminder_type, reminder_type)
 
 
-def format_remind_at(remind_at: datetime | None) -> str:
+def format_event_response(
+    parsed: dict,
+    event_id: int | None = None,
+    reminder_created: bool = False,
+    remind_at: datetime | None = None,
+) -> str:
+    if parsed.get("intent") != "create_event":
+        question = parsed.get("clarification_question")
+        if question:
+            return question
+
+        return (
+            "Я поки не бачу тут конкретної події 🤔\n\n"
+            "Напиши, наприклад:\n"
+            "«Завтра о 12:00 купити корм»"
+        )
+
+    title = parsed.get("title") or "Не вказано"
+    event_type = parsed.get("event_type") or "Не вказано"
+    date = parsed.get("date") or "Не вказано"
+    time_text = parsed.get("time") or "Не вказано"
+
+    is_recurring = parsed.get("is_recurring", False)
+    recurrence_rule = parsed.get("recurrence_rule")
+
+    response = "Я зрозумів і зберіг подію ✅\n\n"
+
+    if event_id:
+        response += f"ID: {event_id}\n"
+
+    response += (
+        f"Назва: {title}\n"
+        f"Тип: {event_type}\n"
+        f"Дата: {date}\n"
+        f"Час: {time_text}\n"
+    )
+
+    if is_recurring:
+        response += f"Повторення: {recurrence_rule or 'так'}\n"
+
+    if reminder_created:
+        response += (
+            "\nНагадування створено автоматично ✅\n"
+            "Тип: за годину до події\n"
+            f"Час нагадування: {format_remind_at(remind_at)}"
+        )
+    else:
+        response += build_reminder_question()
+
+    return response
     if not remind_at:
         return "без нагадування"
 
