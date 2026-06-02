@@ -425,7 +425,19 @@ def build_help_text() -> str:
         "• 10 березня день народження Івана\n"
         "• /remind 10 вимкнути гречку"
     )
+def build_main_keyboard() -> ReplyKeyboardMarkup:
+    keyboard = [
+        ["📅 Сьогодні", "🗓 Тиждень"],
+        ["🔔 Нагадування", "📋 Всі події"],
+        ["⚙️ Допомога"],
+    ]
 
+    return ReplyKeyboardMarkup(
+        keyboard,
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        input_field_placeholder="Напиши подію або вибери кнопку",
+    )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await deny_if_not_allowed(update):
@@ -433,9 +445,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "Привіт! Я твій reminder-agent 🤖\n\n"
-        "Я вмію зберігати події, нагадувати, показувати плани на сьогодні/тиждень "
-        "і робити швидкі нагадування.\n\n"
-        + build_help_text()
+        "Можеш писати події текстом або користуватись кнопками нижче.\n\n"
+        + build_help_text(),
+        reply_markup=build_main_keyboard(),
     )
 
 
