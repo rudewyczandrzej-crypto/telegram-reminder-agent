@@ -194,15 +194,15 @@ def format_event_response(
     if is_recurring:
         response += f"Повторення: {recurrence_rule or 'так'}\n"
 
-    if reminder_created:
+        if reminder_created:
         response += (
             "\nНагадування створено автоматично ✅\n"
             "Тип: за годину до події\n"
             f"Час нагадування: {format_remind_at(remind_at)}"
         )
     else:
-    has_event_time = bool(parsed.get("time"))
-    response += build_reminder_question(has_event_time)
+        has_event_time = bool(parsed.get("time"))
+        response += build_reminder_question(has_event_time)
 
     return response
     if not remind_at:
