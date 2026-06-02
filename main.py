@@ -376,7 +376,38 @@ async def reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     await update.message.reply_text(answer)
+async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_chat_id = update.effective_chat.id
 
+    try:
+        clear_all_user_data(telegram_chat_id)
+        await update.message.reply_text(
+            "Готово ✅\n\n"
+            "Я очистив усі твої події, нагадування і тимчасові стани."
+        )
+    except Exception as error:
+        logging.exception("Error while clearing all user data")
+        await update.message.reply_text(
+            "Не зміг очистити дані 😕\n\n"
+            f"Технічна помилка:\n{type(error).__name__}: {error}"
+        )
+
+
+async def clear_reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_chat_id = update.effective_chat.id
+
+    try:
+        clear_user_reminders(telegram_chat_id)
+        await update.message.reply_text(
+            "Готово ✅\n\n"
+            "Я очистив усі твої нагадування, але події залишив."
+        )
+    except Exception as error:
+        logging.exception("Error while clearing reminders")
+        await update.message.reply_text(
+            "Не зміг очистити нагадування 😕\n\n"
+            f"Технічна помилка:\n{type(error).__name__}: {error}"
+        )
 
 async def handle_pending_reminder_choice(
     update: Update,
