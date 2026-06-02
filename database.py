@@ -296,7 +296,7 @@ def list_reminders(telegram_chat_id: int, limit: int = 10):
                 (telegram_chat_id, limit),
             )
             return cur.fetchall()
-            def clear_all_user_data(telegram_chat_id: int):
+def clear_all_user_data(telegram_chat_id: int):
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
