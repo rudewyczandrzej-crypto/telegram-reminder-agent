@@ -479,7 +479,7 @@ if parsed.get("intent") == "create_event":
 
             event = get_event(event_id, telegram_chat_id)
 
-            if parsed.get("date") and parsed.get("time"):
+            if event_date and event_time:
                 event_datetime = build_event_datetime(event)
                 now = datetime.now(ZoneInfo(TIMEZONE))
 
