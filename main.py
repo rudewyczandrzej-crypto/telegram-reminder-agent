@@ -302,6 +302,8 @@ def build_reminder_question(has_event_time: bool = False) -> str:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+     if await deny_if_not_allowed(update):
+        return
     await update.message.reply_text(
         "Привіт! Я твій reminder-agent 🤖\n\n"
         "Я вже вмію розуміти події, зберігати їх у базу і створювати нагадування.\n\n"
@@ -319,6 +321,8 @@ async def myid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Твій Telegram chat_id:\n{telegram_chat_id}"
     )
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await deny_if_not_allowed(update):
+        return
     await update.message.reply_text(
         "Приклади повідомлень:\n\n"
         "• Завтра о 12:00 купити корм\n"
@@ -391,6 +395,8 @@ def format_reminders_list(reminders: list) -> str:
 
 
 async def events_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await deny_if_not_allowed(update):
+        return
     telegram_chat_id = update.effective_chat.id
 
     try:
@@ -407,6 +413,8 @@ async def events_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await deny_if_not_allowed(update):
+        return
     telegram_chat_id = update.effective_chat.id
 
     try:
@@ -438,6 +446,8 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def clear_reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await deny_if_not_allowed(update):
+        return
     telegram_chat_id = update.effective_chat.id
 
     try:
@@ -517,6 +527,8 @@ async def handle_pending_reminder_choice(
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await deny_if_not_allowed(update):
+        return
     user_text = update.message.text
     telegram_chat_id = update.effective_chat.id
 
