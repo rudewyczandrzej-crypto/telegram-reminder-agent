@@ -320,6 +320,18 @@ async def myid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"Твій Telegram chat_id:\n{telegram_chat_id}"
     )
+async def access_debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_chat_id = update.effective_chat.id
+    raw_allowed = os.getenv("ALLOWED_CHAT_IDS", "")
+    parsed_allowed = get_allowed_chat_ids()
+
+    await update.message.reply_text(
+        "Access debug 🔍\n\n"
+        f"Твій chat_id: {telegram_chat_id}\n"
+        f"ALLOWED_CHAT_IDS raw: {raw_allowed}\n"
+        f"Parsed allowed IDs: {parsed_allowed}\n"
+        f"Is allowed: {is_allowed_chat(telegram_chat_id)}"
+    )
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await deny_if_not_allowed(update):
         return
@@ -656,6 +668,7 @@ def main():
     app.add_handler(CommandHandler("clear", clear_command))
     app.add_handler(CommandHandler("clear_reminders", clear_reminders_command))
     app.add_handler(CommandHandler("myid", myid_command))
+    app.add_handler(CommandHandler("access_debug", access_debug_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     app.job_queue.run_repeating(
