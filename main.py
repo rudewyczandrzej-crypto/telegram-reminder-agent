@@ -468,9 +468,11 @@ def main():
     app.add_handler(CommandHandler("reminders", reminders_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    scheduler = AsyncIOScheduler(timezone=TIMEZONE)
-    scheduler.add_job(send_due_reminders, "interval", seconds=60, args=[app])
-    scheduler.start()
+    app.job_queue.run_repeating(
+    send_due_reminders,
+    interval=60,
+    first=10,
+)
 
     print("Bot is running...")
     app.run_polling()
