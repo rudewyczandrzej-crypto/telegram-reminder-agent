@@ -83,6 +83,7 @@ def parse_reminder_choice(text: str) -> str | None:
         "зранку",
         "в день події",
         "того дня",
+        "сьогодні зранку",
     ]:
         return "same_day_morning"
 
