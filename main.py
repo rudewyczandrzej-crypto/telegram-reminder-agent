@@ -123,6 +123,9 @@ def calculate_remind_at(event, reminder_type: str) -> datetime | None:
     if not event_datetime:
         return None
 
+    if reminder_type == "at_event_time":
+        return event_datetime
+
     if reminder_type == "one_day_before":
         return event_datetime - timedelta(days=1)
 
