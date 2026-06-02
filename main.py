@@ -196,8 +196,7 @@ def format_event_response(
 
     if reminder_created:
         response += (
-            "\nНагадування створено автоматично ✅\n"
-            "Тип: за годину до події\n"
+            "\nНагадування створено ✅\n"
             f"Час нагадування: {format_remind_at(remind_at)}"
         )
     else:
