@@ -97,7 +97,38 @@ def parse_reminder_choice(text: str) -> str | None:
         return "no_reminder"
 
     return None
+def normalize_event_datetime_parts(
+    event_date: str | None,
+    event_time: str | None,
+) -> tuple[str | None, str | None]:
+    if not event_time:
+        return event_date, event_time
 
+    try:
+        hour_text, minute_text = event_time.split(":")
+        hours = int(hour_text)
+        minutes = int(minute_text)
+    except Exception:
+        return event_date, event_time
+
+    if not event_date:
+        event_date = datetime.now(ZoneInfo(TIMEZONE)).date().isoformat()
+
+    try:
+        base_date = datetime.strptime(event_date, "%Y-%m-%d").date()
+    except Exception:
+        return event_date, event_time
+
+    normalized_datetime = datetime.combine(
+        base_date,
+        time(hour=0, minute=0),
+        tzinfo=ZoneInfo(TIMEZONE),
+    ) + timedelta(hours=hours, minutes=minutes)
+
+    return (
+        normalized_datetime.date().isoformat(),
+        normalized_datetime.strftime("%H:%M"),
+    )
 
 def build_event_datetime(event) -> datetime | None:
     event_date = event.get("event_date")
@@ -465,10 +496,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if parsed.get("intent") == "create_event":
             event_date = parsed.get("date")
             event_time = parsed.get("time")
+    
+            event_date, event_time = normalize_event_datetime_parts(event_date, event_time)
 
-            if event_time and not event_date:
-                event_date = datetime.now(ZoneInfo(TIMEZONE)).date().isoformat()
-                parsed["date"] = event_date
+            parsed["date"] = event_date
+            parsed["time"] = event_time
 
             event_id = save_event(
                 telegram_chat_id=telegram_chat_id,
