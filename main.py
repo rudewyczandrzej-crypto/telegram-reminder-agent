@@ -277,7 +277,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help — допомога"
     )
 
-
+async def myid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_chat_id = update.effective_chat.id
+    await update.message.reply_text(
+        f"Твій Telegram chat_id:\n{telegram_chat_id}"
+    )
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Приклади повідомлень:\n\n"
@@ -596,13 +600,14 @@ def main():
     init_db()
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("events", events_command))
     app.add_handler(CommandHandler("reminders", reminders_command))
     app.add_handler(CommandHandler("clear", clear_command))
     app.add_handler(CommandHandler("clear_reminders", clear_reminders_command))
+    app.add_handler(CommandHandler("myid", myid_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     app.job_queue.run_repeating(
