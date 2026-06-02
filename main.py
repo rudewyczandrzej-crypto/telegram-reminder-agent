@@ -90,6 +90,11 @@ def get_allowed_chat_ids() -> set[int]:
 
 def is_allowed_chat(telegram_chat_id: int) -> bool:
     allowed_ids = get_allowed_chat_ids()
+
+    if not allowed_ids:
+        return True
+
+    return telegram_chat_id in allowed_ids
 async def deny_if_not_allowed(update: Update) -> bool:
     telegram_chat_id = update.effective_chat.id
 
