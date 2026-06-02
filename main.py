@@ -68,7 +68,43 @@ logging.basicConfig(
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TIMEZONE = "Europe/Warsaw"
+ALLOWED_CHAT_IDS_RAW = os.getenv("ALLOWED_CHAT_IDS", "")
 
+
+def get_allowed_chat_ids() -> set[int]:
+    allowed_ids = set()
+
+    for item in ALLOWED_CHAT_IDS_RAW.split(","):
+        item = item.strip()
+
+        if not item:
+            continue
+
+        try:
+            allowed_ids.add(int(item))
+        except ValueError:
+            continue
+
+    return allowed_ids
+
+
+def is_allowed_chat(telegram_chat_id: int) -> bool:
+    allowed_ids = get_allowed_chat_ids()
+async def deny_if_not_allowed(update: Update) -> bool:
+    telegram_chat_id = update.effective_chat.id
+
+    if is_allowed_chat(telegram_chat_id):
+        return False
+
+    await update.message.reply_text(
+        "Доступ закритий 🔒\n\n"
+        "Цей бот приватний."
+    )
+    return True
+    if not allowed_ids:
+        return True
+
+    return telegram_chat_id in allowed_ids
 
 def parse_reminder_choice(text: str) -> str | None:
     normalized = text.lower().strip()
