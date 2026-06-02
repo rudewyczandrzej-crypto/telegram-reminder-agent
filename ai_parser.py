@@ -3,19 +3,19 @@ import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from google import genai
+from groq import Groq
 
 
 TIMEZONE = "Europe/Warsaw"
 
 
-def get_gemini_client():
-    api_key = os.getenv("GEMINI_API_KEY")
+def get_groq_client():
+    api_key = os.getenv("GROQ_API_KEY")
 
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY не знайдено у Railway Variables")
+        raise RuntimeError("GROQ_API_KEY не знайдено у Railway Variables")
 
-    return genai.Client(api_key=api_key)
+    return Groq(api_key=api_key)
 
 
 def clean_json_text(text: str) -> str:
@@ -36,7 +36,7 @@ def clean_json_text(text: str) -> str:
 def parse_event_from_text(user_text: str) -> dict:
     now = datetime.now(ZoneInfo(TIMEZONE))
 
-    prompt = f"""
+    system_prompt = f"""
 Ти AI-парсер для Telegram reminder-agent.
 
 Твоє завдання — перетворити повідомлення користувача в JSON.
@@ -46,9 +46,6 @@ def parse_event_from_text(user_text: str) -> dict:
 
 Часовий пояс користувача:
 {TIMEZONE}
-
-Повідомлення користувача:
-{user_text}
 
 Правила:
 1. Відповідай тільки валідним JSON.
@@ -78,14 +75,25 @@ def parse_event_from_text(user_text: str) -> dict:
 }}
 """
 
-    client = get_gemini_client()
+    client = get_groq_client()
 
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt,
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "system",
+                "content": system_prompt,
+            },
+            {
+                "role": "user",
+                "content": user_text,
+            },
+        ],
+        temperature=0,
     )
 
-    raw_text = clean_json_text(response.text)
+    raw_text = response.choices[0].message.content
+    raw_text = clean_json_text(raw_text)
 
     try:
         return json.loads(raw_text)
