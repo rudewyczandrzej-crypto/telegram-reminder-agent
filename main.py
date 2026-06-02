@@ -56,8 +56,9 @@ from database import (
     list_due_reminders,
     mark_reminder_sent,
     list_reminders,
+    clear_all_user_data,
+    clear_user_reminders,
 )
-
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
