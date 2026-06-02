@@ -1039,12 +1039,6 @@ async def send_due_reminders(context: ContextTypes.DEFAULT_TYPE):
         logging.exception("Error while sending due reminders")
 
 
-def main():
-    if not TELEGRAM_BOT_TOKEN:
-        raise RuntimeError("Не знайдено TELEGRAM_BOT_TOKEN у Railway Variables.")
-
-    init_db()
-
 async def post_init(application):
     await application.bot.set_my_commands(
         [
@@ -1060,12 +1054,20 @@ async def post_init(application):
         ]
     )
 
-app = (
-    ApplicationBuilder()
-    .token(TELEGRAM_BOT_TOKEN)
-    .post_init(post_init)
-    .build()
-)
+
+def main():
+    if not TELEGRAM_BOT_TOKEN:
+        raise RuntimeError("Не знайдено TELEGRAM_BOT_TOKEN у Railway Variables.")
+
+    init_db()
+
+    app = (
+        ApplicationBuilder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
+
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
