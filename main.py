@@ -809,7 +809,53 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_text = update.message.text
     telegram_chat_id = update.effective_chat.id
+    if user_text == "📅 Сьогодні":
+        events = list_events_between(
+            telegram_chat_id,
+            datetime.now(ZoneInfo(TIMEZONE)).date(),
+            datetime.now(ZoneInfo(TIMEZONE)).date(),
+        )
+        await update.message.reply_text(
+            format_events_list(events, title="Події на сьогодні"),
+            reply_markup=build_main_keyboard(),
+        )
+        return
 
+    if user_text == "🗓 Тиждень":
+        today = datetime.now(ZoneInfo(TIMEZONE)).date()
+        events = list_events_between(
+            telegram_chat_id,
+            today,
+            today + timedelta(days=7),
+        )
+        await update.message.reply_text(
+            format_events_list(events, title="Події на найближчі 7 днів"),
+            reply_markup=build_main_keyboard(),
+        )
+        return
+
+    if user_text == "🔔 Нагадування":
+        reminders = list_reminders(telegram_chat_id)
+        await update.message.reply_text(
+            format_reminders_list(reminders),
+            reply_markup=build_main_keyboard(),
+        )
+        return
+
+    if user_text == "📋 Всі події":
+        events = list_events(telegram_chat_id)
+        await update.message.reply_text(
+            format_events_list(events),
+            reply_markup=build_main_keyboard(),
+        )
+        return
+
+    if user_text == "⚙️ Допомога":
+        await update.message.reply_text(
+            build_help_text(),
+            reply_markup=build_main_keyboard(),
+        )
+        return
     try:
         state = get_conversation_state(telegram_chat_id)
 
@@ -999,7 +1045,28 @@ def main():
 
     init_db()
 
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    async def post_init(application):
+    await application.bot.set_my_commands(
+        [
+            BotCommand("start", "Запустити бота"),
+            BotCommand("today", "Події на сьогодні"),
+            BotCommand("week", "Події на 7 днів"),
+            BotCommand("events", "Всі події"),
+            BotCommand("reminders", "Нагадування"),
+            BotCommand("remind", "Швидке нагадування"),
+            BotCommand("delete", "Видалити подію"),
+            BotCommand("clear", "Очистити все"),
+            BotCommand("help", "Допомога"),
+        ]
+    )
+
+
+app = (
+    ApplicationBuilder()
+    .token(TELEGRAM_BOT_TOKEN)
+    .post_init(post_init)
+    .build()
+)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
