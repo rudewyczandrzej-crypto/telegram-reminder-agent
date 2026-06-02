@@ -473,50 +473,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         parsed = parse_event_from_text(user_text)
 
-      event_id = None
-reminder_created = False
-remind_at = None
+        event_id = None
+        reminder_created = False
+        remind_at = None
 
-if parsed.get("intent") == "create_event":
-    event_id = save_event(
-        telegram_chat_id=telegram_chat_id,
-        title=parsed.get("title") or "Без назви",
-        event_type=parsed.get("event_type"),
-        event_date=parsed.get("date"),
-        event_time=parsed.get("time"),
-        is_recurring=parsed.get("is_recurring", False),
-        recurrence_rule=parsed.get("recurrence_rule"),
-        reminder_missing=parsed.get("reminder_missing", True),
-    )
+        if parsed.get("intent") == "create_event":
+            event_id = save_event(
+                telegram_chat_id=telegram_chat_id,
+                title=parsed.get("title") or "Без назви",
+                event_type=parsed.get("event_type"),
+                event_date=parsed.get("date"),
+                event_time=parsed.get("time"),
+                is_recurring=parsed.get("is_recurring", False),
+                recurrence_rule=parsed.get("recurrence_rule"),
+                reminder_missing=parsed.get("reminder_missing", True),
+            )
 
-    event = get_event(event_id, telegram_chat_id)
+            event = get_event(event_id, telegram_chat_id)
 
-    if parsed.get("date") and parsed.get("time"):
-        remind_at = calculate_remind_at(event, "one_hour_before")
+            if parsed.get("date") and parsed.get("time"):
+                remind_at = calculate_remind_at(event, "one_hour_before")
 
-        save_reminder(
-            event_id=event_id,
-            telegram_chat_id=telegram_chat_id,
+                save_reminder(
+                    event_id=event_id,
+                    telegram_chat_id=telegram_chat_id,
+                    remind_at=remind_at,
+                    reminder_type="one_hour_before",
+                )
+
+                reminder_created = True
+                clear_conversation_state(telegram_chat_id)
+
+            else:
+                set_conversation_state(
+                    telegram_chat_id=telegram_chat_id,
+                    pending_action="choose_reminder_time",
+                    pending_event_id=event_id,
+                )
+
+        answer = format_event_response(
+            parsed,
+            event_id,
+            reminder_created=reminder_created,
             remind_at=remind_at,
-            reminder_type="one_hour_before",
         )
-
-        reminder_created = True
-        clear_conversation_state(telegram_chat_id)
-
-    else:
-        set_conversation_state(
-            telegram_chat_id=telegram_chat_id,
-            pending_action="choose_reminder_time",
-            pending_event_id=event_id,
-        )
-
-answer = format_event_response(
-    parsed,
-    event_id,
-    reminder_created=reminder_created,
-    remind_at=remind_at,
-)
 
     except Exception as error:
         logging.exception("Error while handling message")
@@ -526,7 +526,6 @@ answer = format_event_response(
         )
 
     await update.message.reply_text(answer)
-
 
 async def send_due_reminders(app):
     now = datetime.now(ZoneInfo(TIMEZONE))
