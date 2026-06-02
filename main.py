@@ -1,5 +1,8 @@
 import os
 import logging
+from datetime import datetime, timedelta, time
+
+from zoneinfo import ZoneInfo
 
 from telegram import Update
 from telegram.ext import (
@@ -10,8 +13,22 @@ from telegram.ext import (
     filters,
 )
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from ai_parser import parse_event_from_text
-from database import init_db, save_event, list_events
+from database import (
+    init_db,
+    save_event,
+    get_event,
+    list_events,
+    set_conversation_state,
+    get_conversation_state,
+    clear_conversation_state,
+    save_reminder,
+    list_due_reminders,
+    mark_reminder_sent,
+    list_reminders,
+)
 
 
 logging.basicConfig(
@@ -21,16 +38,119 @@ logging.basicConfig(
 
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TIMEZONE = "Europe/Warsaw"
+
+
+def parse_reminder_choice(text: str) -> str | None:
+    normalized = text.lower().strip()
+
+    if normalized in ["1", "за день", "за 1 день", "день", "за добу"]:
+        return "one_day_before"
+
+    if normalized in [
+        "2",
+        "в той самий день",
+        "в цей день",
+        "зранку",
+        "в день події",
+        "того дня",
+    ]:
+        return "same_day_morning"
+
+    if normalized in ["3", "за годину", "за 1 годину", "годину"]:
+        return "one_hour_before"
+
+    if normalized in ["4", "за 10 хвилин", "за 10 хв", "10 хв", "10 хвилин"]:
+        return "ten_minutes_before"
+
+    if normalized in ["5", "не нагадувати", "без нагадування", "не треба"]:
+        return "no_reminder"
+
+    return None
+
+
+def build_event_datetime(event) -> datetime | None:
+    event_date = event.get("event_date")
+    event_time = event.get("event_time")
+
+    if not event_date:
+        return None
+
+    if event_time:
+        event_datetime = datetime.combine(event_date, event_time)
+    else:
+        event_datetime = datetime.combine(event_date, time(hour=9, minute=0))
+
+    return event_datetime.replace(tzinfo=ZoneInfo(TIMEZONE))
+
+
+def calculate_remind_at(event, reminder_type: str) -> datetime | None:
+    event_datetime = build_event_datetime(event)
+
+    if reminder_type == "no_reminder":
+        return None
+
+    if not event_datetime:
+        return None
+
+    if reminder_type == "one_day_before":
+        return event_datetime - timedelta(days=1)
+
+    if reminder_type == "same_day_morning":
+        return datetime.combine(
+            event_datetime.date(),
+            time(hour=9, minute=0),
+            tzinfo=ZoneInfo(TIMEZONE),
+        )
+
+    if reminder_type == "one_hour_before":
+        return event_datetime - timedelta(hours=1)
+
+    if reminder_type == "ten_minutes_before":
+        return event_datetime - timedelta(minutes=10)
+
+    return None
+
+
+def reminder_type_to_text(reminder_type: str) -> str:
+    mapping = {
+        "one_day_before": "за день",
+        "same_day_morning": "в той самий день зранку",
+        "one_hour_before": "за годину",
+        "ten_minutes_before": "за 10 хвилин",
+        "no_reminder": "без нагадування",
+    }
+
+    return mapping.get(reminder_type, reminder_type)
+
+
+def format_remind_at(remind_at: datetime | None) -> str:
+    if not remind_at:
+        return "без нагадування"
+
+    return remind_at.strftime("%Y-%m-%d %H:%M")
+
+
+def build_reminder_question() -> str:
+    return (
+        "\nКоли нагадати?\n"
+        "1. За день\n"
+        "2. В той самий день зранку\n"
+        "3. За годину\n"
+        "4. За 10 хвилин\n"
+        "5. Не нагадувати"
+    )
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привіт! Я твій reminder-agent 🤖\n\n"
-        "Я вже вмію розуміти події і зберігати їх у базу.\n\n"
+        "Я вже вмію розуміти події, зберігати їх у базу і створювати нагадування.\n\n"
         "Напиши мені подію, наприклад:\n"
         "«Я записався на стрижку наступного вівторка о 15:00»\n\n"
         "Команди:\n"
         "/events — показати збережені події\n"
+        "/reminders — показати нагадування\n"
         "/help — допомога"
     )
 
@@ -42,8 +162,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• У пʼятницю о 18:30 стоматолог\n"
         "• 10 березня день народження Івана\n"
         "• Наступного вівторка о 15:00 стрижка\n\n"
+        "Коли бот запитає, коли нагадати, можна відповісти:\n"
+        "• за день\n"
+        "• за годину\n"
+        "• за 10 хвилин\n"
+        "• не нагадувати\n\n"
         "Команди:\n"
-        "/events — показати найближчі збережені події"
+        "/events — показати події\n"
+        "/reminders — показати нагадування"
     )
 
 
@@ -62,12 +188,12 @@ def format_event_response(parsed: dict, event_id: int | None = None) -> str:
     title = parsed.get("title") or "Не вказано"
     event_type = parsed.get("event_type") or "Не вказано"
     date = parsed.get("date") or "Не вказано"
-    time = parsed.get("time") or "Не вказано"
+    time_text = parsed.get("time") or "Не вказано"
 
     is_recurring = parsed.get("is_recurring", False)
     recurrence_rule = parsed.get("recurrence_rule")
 
-    response = "Я зрозумів і зберіг подію ✅\n\n"
+    response = "Я зрозумів подію ✅\n\n"
 
     if event_id:
         response += f"ID: {event_id}\n"
@@ -76,17 +202,13 @@ def format_event_response(parsed: dict, event_id: int | None = None) -> str:
         f"Назва: {title}\n"
         f"Тип: {event_type}\n"
         f"Дата: {date}\n"
-        f"Час: {time}\n"
+        f"Час: {time_text}\n"
     )
 
     if is_recurring:
         response += f"Повторення: {recurrence_rule or 'так'}\n"
 
-    if parsed.get("reminder_missing"):
-        response += (
-            "\nНаступним кроком ми навчимо бота питати і зберігати час нагадування.\n"
-            "Поки що подія просто збережена в базу."
-        )
+    response += build_reminder_question()
 
     return response
 
@@ -119,6 +241,33 @@ def format_events_list(events: list) -> str:
     return "\n\n".join(lines)
 
 
+def format_reminders_list(reminders: list) -> str:
+    if not reminders:
+        return "У тебе поки немає нагадувань."
+
+    lines = ["Твої нагадування:\n"]
+
+    for reminder in reminders:
+        remind_at = reminder["remind_at"]
+        sent = reminder["sent"]
+        title = reminder["title"]
+
+        status = "надіслано" if sent else "очікує"
+
+        if remind_at:
+            remind_text = remind_at.strftime("%Y-%m-%d %H:%M")
+        else:
+            remind_text = "без часу"
+
+        lines.append(
+            f"{reminder['id']}. {title}\n"
+            f"   Нагадати: {remind_text}\n"
+            f"   Статус: {status}"
+        )
+
+    return "\n\n".join(lines)
+
+
 async def events_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_chat_id = update.effective_chat.id
 
@@ -135,11 +284,84 @@ async def events_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(answer)
 
 
+async def reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    telegram_chat_id = update.effective_chat.id
+
+    try:
+        reminders = list_reminders(telegram_chat_id)
+        answer = format_reminders_list(reminders)
+    except Exception as error:
+        logging.exception("Error while listing reminders")
+        answer = (
+            "Не зміг отримати список нагадувань 😕\n\n"
+            f"Технічна помилка:\n{type(error).__name__}: {error}"
+        )
+
+    await update.message.reply_text(answer)
+
+
+async def handle_pending_reminder_choice(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    state,
+):
+    telegram_chat_id = update.effective_chat.id
+    user_text = update.message.text
+
+    reminder_type = parse_reminder_choice(user_text)
+
+    if not reminder_type:
+        await update.message.reply_text(
+            "Не зрозумів, коли нагадати 😕\n"
+            "Вибери один варіант:\n"
+            "1. За день\n"
+            "2. В той самий день зранку\n"
+            "3. За годину\n"
+            "4. За 10 хвилин\n"
+            "5. Не нагадувати"
+        )
+        return
+
+    event_id = state["pending_event_id"]
+    event = get_event(event_id, telegram_chat_id)
+
+    if not event:
+        clear_conversation_state(telegram_chat_id)
+        await update.message.reply_text(
+            "Не знайшов подію, для якої треба створити нагадування 😕"
+        )
+        return
+
+    remind_at = calculate_remind_at(event, reminder_type)
+
+    save_reminder(
+        event_id=event_id,
+        telegram_chat_id=telegram_chat_id,
+        remind_at=remind_at,
+        reminder_type=reminder_type,
+    )
+
+    clear_conversation_state(telegram_chat_id)
+
+    await update.message.reply_text(
+        "Готово ✅\n\n"
+        f"Подія: {event['title']}\n"
+        f"Нагадування: {reminder_type_to_text(reminder_type)}\n"
+        f"Час нагадування: {format_remind_at(remind_at)}"
+    )
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     telegram_chat_id = update.effective_chat.id
 
     try:
+        state = get_conversation_state(telegram_chat_id)
+
+        if state and state["pending_action"] == "choose_reminder_time":
+            await handle_pending_reminder_choice(update, context, state)
+            return
+
         parsed = parse_event_from_text(user_text)
 
         event_id = None
@@ -156,6 +378,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reminder_missing=parsed.get("reminder_missing", True),
             )
 
+            set_conversation_state(
+                telegram_chat_id=telegram_chat_id,
+                pending_action="choose_reminder_time",
+                pending_event_id=event_id,
+            )
+
         answer = format_event_response(parsed, event_id)
 
     except Exception as error:
@@ -166,6 +394,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     await update.message.reply_text(answer)
+
+
+async def send_due_reminders(app):
+    now = datetime.now(ZoneInfo(TIMEZONE))
+
+    try:
+        reminders = list_due_reminders(now)
+
+        for reminder in reminders:
+            telegram_chat_id = reminder["telegram_chat_id"]
+            title = reminder["title"]
+            event_date = reminder["event_date"]
+            event_time = reminder["event_time"]
+
+            message = (
+                "🔔 Нагадування\n\n"
+                f"Подія: {title}\n"
+                f"Дата: {event_date or 'без дати'}\n"
+                f"Час: {event_time or 'без часу'}"
+            )
+
+            await app.bot.send_message(
+                chat_id=telegram_chat_id,
+                text=message,
+            )
+
+            mark_reminder_sent(reminder["reminder_id"])
+
+    except Exception:
+        logging.exception("Error while sending due reminders")
 
 
 def main():
@@ -179,7 +437,12 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("events", events_command))
+    app.add_handler(CommandHandler("reminders", reminders_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    scheduler = AsyncIOScheduler(timezone=TIMEZONE)
+    scheduler.add_job(send_due_reminders, "interval", seconds=60, args=[app])
+    scheduler.start()
 
     print("Bot is running...")
     app.run_polling()
