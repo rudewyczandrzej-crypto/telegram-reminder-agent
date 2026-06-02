@@ -498,32 +498,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reminder_created = False
         remind_at = None
 
-        if parsed.get("intent") == "create_event":
-            event_id = save_event(
-                telegram_chat_id=telegram_chat_id,
-                title=parsed.get("title") or "Без назви",
-                event_type=parsed.get("event_type"),
-                event_date=parsed.get("date"),
-                event_time=parsed.get("time"),
-                is_recurring=parsed.get("is_recurring", False),
-                recurrence_rule=parsed.get("recurrence_rule"),
-                reminder_missing=parsed.get("reminder_missing", True),
-            )
+if parsed.get("date") and parsed.get("time"):
+    event_datetime = build_event_datetime(event)
+    now = datetime.now(ZoneInfo(TIMEZONE))
 
-            event = get_event(event_id, telegram_chat_id)
+    if event_datetime and event_datetime <= now + timedelta(hours=1):
+        reminder_type = "at_event_time"
+    else:
+        reminder_type = "one_hour_before"
 
-            if parsed.get("date") and parsed.get("time"):
-                remind_at = calculate_remind_at(event, "one_hour_before")
+    remind_at = calculate_remind_at(event, reminder_type)
 
-                save_reminder(
-                    event_id=event_id,
-                    telegram_chat_id=telegram_chat_id,
-                    remind_at=remind_at,
-                    reminder_type="one_hour_before",
-                )
+    save_reminder(
+        event_id=event_id,
+        telegram_chat_id=telegram_chat_id,
+        remind_at=remind_at,
+        reminder_type=reminder_type,
+    )
 
-                reminder_created = True
-                clear_conversation_state(telegram_chat_id)
+    reminder_created = True
+    clear_conversation_state(telegram_chat_id)
 
             else:
                 set_conversation_state(
