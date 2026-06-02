@@ -151,6 +151,7 @@ def reminder_type_to_text(reminder_type: str) -> str:
         "same_day_morning": "в той самий день зранку",
         "one_hour_before": "за годину",
         "ten_minutes_before": "за 10 хвилин",
+        "at_event_time": "у момент події",
         "no_reminder": "без нагадування",
     }
 
