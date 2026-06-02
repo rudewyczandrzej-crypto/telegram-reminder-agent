@@ -452,6 +452,19 @@ async def handle_pending_reminder_choice(
         )
         return
 
+    has_event_time = bool(event.get("event_time"))
+
+    if not has_event_time and reminder_type in ["one_hour_before", "ten_minutes_before"]:
+        await update.message.reply_text(
+            "Для цієї події не вказана година, тому я не можу нагадати "
+            "«за годину» або «за 10 хвилин».\n\n"
+            "Вибери:\n"
+            "1. За день\n"
+            "2. В той самий день зранку\n"
+            "5. Не нагадувати"
+        )
+        return
+
     remind_at = calculate_remind_at(event, reminder_type)
 
     save_reminder(
@@ -469,7 +482,6 @@ async def handle_pending_reminder_choice(
         f"Нагадування: {reminder_type_to_text(reminder_type)}\n"
         f"Час нагадування: {format_remind_at(remind_at)}"
     )
-
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
