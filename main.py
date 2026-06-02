@@ -4,7 +4,13 @@ from datetime import datetime, timedelta, time, date
 
 from zoneinfo import ZoneInfo
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    BotCommand,
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
