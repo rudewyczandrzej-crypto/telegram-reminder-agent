@@ -296,3 +296,45 @@ def list_reminders(telegram_chat_id: int, limit: int = 10):
                 (telegram_chat_id, limit),
             )
             return cur.fetchall()
+            def clear_all_user_data(telegram_chat_id: int):
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM reminders
+                WHERE telegram_chat_id = %s;
+                """,
+                (telegram_chat_id,),
+            )
+
+            cur.execute(
+                """
+                DELETE FROM events
+                WHERE telegram_chat_id = %s;
+                """,
+                (telegram_chat_id,),
+            )
+
+            cur.execute(
+                """
+                DELETE FROM conversation_state
+                WHERE telegram_chat_id = %s;
+                """,
+                (telegram_chat_id,),
+            )
+
+            conn.commit()
+
+
+def clear_user_reminders(telegram_chat_id: int):
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM reminders
+                WHERE telegram_chat_id = %s;
+                """,
+                (telegram_chat_id,),
+            )
+
+            conn.commit()
