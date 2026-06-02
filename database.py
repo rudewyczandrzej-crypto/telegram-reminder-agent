@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 import psycopg
 from psycopg.rows import dict_row
@@ -127,7 +127,7 @@ def get_event(event_id: int, telegram_chat_id: int):
             return cur.fetchone()
 
 
-def list_events(telegram_chat_id: int, limit: int = 10):
+def list_events(telegram_chat_id: int, limit: int = 20):
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -148,6 +148,46 @@ def list_events(telegram_chat_id: int, limit: int = 10):
                 (telegram_chat_id, limit),
             )
             return cur.fetchall()
+
+
+def list_events_between(telegram_chat_id: int, start_date: date, end_date: date):
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    title,
+                    event_type,
+                    event_date,
+                    event_time,
+                    is_recurring,
+                    recurrence_rule
+                FROM events
+                WHERE telegram_chat_id = %s
+                  AND event_date >= %s
+                  AND event_date <= %s
+                ORDER BY event_date ASC, event_time NULLS LAST, id ASC;
+                """,
+                (telegram_chat_id, start_date, end_date),
+            )
+            return cur.fetchall()
+
+
+def delete_event(event_id: int, telegram_chat_id: int) -> bool:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM events
+                WHERE id = %s AND telegram_chat_id = %s
+                RETURNING id;
+                """,
+                (event_id, telegram_chat_id),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return row is not None
 
 
 def set_conversation_state(
@@ -243,6 +283,7 @@ def list_due_reminders(now: datetime):
                     reminders.reminder_type,
                     events.id AS event_id,
                     events.title,
+                    events.event_type,
                     events.event_date,
                     events.event_time,
                     events.is_recurring,
@@ -274,7 +315,7 @@ def mark_reminder_sent(reminder_id: int):
             conn.commit()
 
 
-def list_reminders(telegram_chat_id: int, limit: int = 10):
+def list_reminders(telegram_chat_id: int, limit: int = 20):
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -290,12 +331,101 @@ def list_reminders(telegram_chat_id: int, limit: int = 10):
                 FROM reminders
                 JOIN events ON events.id = reminders.event_id
                 WHERE reminders.telegram_chat_id = %s
-                ORDER BY reminders.remind_at NULLS LAST
+                ORDER BY reminders.sent ASC, reminders.remind_at NULLS LAST
                 LIMIT %s;
                 """,
                 (telegram_chat_id, limit),
             )
             return cur.fetchall()
+
+
+def get_reminder(reminder_id: int, telegram_chat_id: int):
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    reminders.id,
+                    reminders.event_id,
+                    reminders.telegram_chat_id,
+                    reminders.remind_at,
+                    reminders.reminder_type,
+                    reminders.sent,
+                    events.title,
+                    events.event_date,
+                    events.event_time,
+                    events.is_recurring,
+                    events.recurrence_rule
+                FROM reminders
+                JOIN events ON events.id = reminders.event_id
+                WHERE reminders.id = %s
+                  AND reminders.telegram_chat_id = %s;
+                """,
+                (reminder_id, telegram_chat_id),
+            )
+            return cur.fetchone()
+
+
+def delete_reminder(reminder_id: int, telegram_chat_id: int) -> bool:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM reminders
+                WHERE id = %s AND telegram_chat_id = %s
+                RETURNING id;
+                """,
+                (reminder_id, telegram_chat_id),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return row is not None
+
+
+def update_event_next_year(event_id: int, telegram_chat_id: int):
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE events
+                SET event_date = event_date + INTERVAL '1 year'
+                WHERE id = %s
+                  AND telegram_chat_id = %s
+                  AND event_date IS NOT NULL
+                RETURNING
+                    id,
+                    telegram_chat_id,
+                    title,
+                    event_type,
+                    event_date,
+                    event_time,
+                    is_recurring,
+                    recurrence_rule;
+                """,
+                (event_id, telegram_chat_id),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return row
+
+
+def snooze_reminder(reminder_id: int, telegram_chat_id: int, new_remind_at: datetime):
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE reminders
+                SET remind_at = %s,
+                    sent = FALSE,
+                    sent_at = NULL
+                WHERE id = %s
+                  AND telegram_chat_id = %s;
+                """,
+                (new_remind_at, reminder_id, telegram_chat_id),
+            )
+            conn.commit()
+
+
 def clear_all_user_data(telegram_chat_id: int):
     with get_connection() as conn:
         with conn.cursor() as cur:
