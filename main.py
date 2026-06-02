@@ -458,24 +458,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reminder_created = False
         remind_at = None
 
-if parsed.get("intent") == "create_event":
-    event_date = parsed.get("date")
-    event_time = parsed.get("time")
+        if parsed.get("intent") == "create_event":
+            event_date = parsed.get("date")
+            event_time = parsed.get("time")
 
-    if event_time and not event_date:
-        event_date = datetime.now(ZoneInfo(TIMEZONE)).date().isoformat()
-        parsed["date"] = event_date
+            if event_time and not event_date:
+                event_date = datetime.now(ZoneInfo(TIMEZONE)).date().isoformat()
+                parsed["date"] = event_date
 
-    event_id = save_event(
-        telegram_chat_id=telegram_chat_id,
-        title=parsed.get("title") or "Без назви",
-        event_type=parsed.get("event_type"),
-        event_date=event_date,
-        event_time=event_time,
-        is_recurring=parsed.get("is_recurring", False),
-        recurrence_rule=parsed.get("recurrence_rule"),
-        reminder_missing=parsed.get("reminder_missing", True),
-    )
+            event_id = save_event(
+                telegram_chat_id=telegram_chat_id,
+                title=parsed.get("title") or "Без назви",
+                event_type=parsed.get("event_type"),
+                event_date=event_date,
+                event_time=event_time,
+                is_recurring=parsed.get("is_recurring", False),
+                recurrence_rule=parsed.get("recurrence_rule"),
+                reminder_missing=parsed.get("reminder_missing", True),
+            )
 
             event = get_event(event_id, telegram_chat_id)
 
