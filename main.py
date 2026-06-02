@@ -36,7 +36,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Приклади:\n"
         "• Завтра о 12:00 купити корм\n"
         "• У пʼятницю о 18:30 стоматолог\n"
-        "• 10 березня день народження Івана\n"
+        "• 10 березня день народження Івана"
     )
 
 
@@ -95,19 +95,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         parsed = parse_event_from_text(user_text)
         answer = format_event_response(parsed)
-except Exception as error:
-    logging.exception("Error while parsing message")
-    answer = (
-        "Сталася помилка при розборі повідомлення 😕\n\n"
-        f"Технічна помилка:\n{type(error).__name__}: {error}"
-    )
+    except Exception as error:
+        logging.exception("Error while parsing message")
+        answer = (
+            "Сталася помилка при розборі повідомлення 😕\n\n"
+            f"Технічна помилка:\n{type(error).__name__}: {error}"
+        )
 
     await update.message.reply_text(answer)
 
 
 def main():
     if not TELEGRAM_BOT_TOKEN:
-        raise RuntimeError("Не знайдено TELEGRAM_BOT_TOKEN у змінних середовища.")
+        raise RuntimeError("Не знайдено TELEGRAM_BOT_TOKEN у Railway Variables.")
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
