@@ -3,18 +3,40 @@ import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from openai import OpenAI
+from google import genai
 
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 TIMEZONE = "Europe/Warsaw"
+
+
+def get_gemini_client():
+    api_key = os.getenv("GEMINI_API_KEY")
+
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY не знайдено у Railway Variables")
+
+    return genai.Client(api_key=api_key)
+
+
+def clean_json_text(text: str) -> str:
+    text = text.strip()
+
+    if text.startswith("```json"):
+        text = text.replace("```json", "", 1).strip()
+
+    if text.startswith("```"):
+        text = text.replace("```", "", 1).strip()
+
+    if text.endswith("```"):
+        text = text[:-3].strip()
+
+    return text
 
 
 def parse_event_from_text(user_text: str) -> dict:
     now = datetime.now(ZoneInfo(TIMEZONE))
 
-    system_prompt = f"""
+    prompt = f"""
 Ти AI-парсер для Telegram reminder-agent.
 
 Твоє завдання — перетворити повідомлення користувача в JSON.
@@ -24,6 +46,9 @@ def parse_event_from_text(user_text: str) -> dict:
 
 Часовий пояс користувача:
 {TIMEZONE}
+
+Повідомлення користувача:
+{user_text}
 
 Правила:
 1. Відповідай тільки валідним JSON.
@@ -36,6 +61,7 @@ def parse_event_from_text(user_text: str) -> dict:
 8. Для дат використовуй формат YYYY-MM-DD.
 9. Для часу використовуй формат HH:MM.
 10. Назву події зроби короткою і зрозумілою українською.
+11. Якщо це день народження і рік не вказано — використовуй найближчу майбутню дату цього дня народження.
 
 Формат JSON:
 {{
@@ -52,21 +78,14 @@ def parse_event_from_text(user_text: str) -> dict:
 }}
 """
 
-    response = client.responses.create(
-        model="gpt-4o-mini",
-        input=[
-            {
-                "role": "system",
-                "content": system_prompt,
-            },
-            {
-                "role": "user",
-                "content": user_text,
-            },
-        ],
+    client = get_gemini_client()
+
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt,
     )
 
-    raw_text = response.output_text.strip()
+    raw_text = clean_json_text(response.text)
 
     try:
         return json.loads(raw_text)
@@ -81,5 +100,5 @@ def parse_event_from_text(user_text: str) -> dict:
             "recurrence_rule": None,
             "reminder_missing": False,
             "needs_clarification": True,
-            "clarification_question": "Не зміг нормально розібрати повідомлення. Напиши, будь ласка, простіше.",
+            "clarification_question": f"Не зміг нормально розібрати відповідь AI. Отримав: {raw_text[:300]}",
         }
