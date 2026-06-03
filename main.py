@@ -9,7 +9,6 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
-    BotCommand,
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -339,9 +338,10 @@ def format_event_response(
 
     if reminder_created:
         response += (
-            "\nНагадування створено ✅\n"
-            f"Час нагадування: {format_remind_at(remind_at)}"
-        )
+        "\nНагадування створено ✅\n"
+        "Тип: у момент події\n"
+        f"Час нагадування: {format_remind_at(remind_at)}"
+    )
     else:
         has_event_time = bool(parsed.get("time"))
         response += build_reminder_question(has_event_time)
@@ -891,26 +891,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             event = get_event(event_id, telegram_chat_id)
 
-            if event_date and event_time:
-                event_datetime = build_event_datetime(event)
-                now = datetime.now(ZoneInfo(TIMEZONE))
+if event_date and event_time:
+    reminder_type = "at_event_time"
+    remind_at = calculate_remind_at(event, reminder_type)
 
-                if event_datetime and event_datetime <= now + timedelta(hours=1):
-                    reminder_type = "at_event_time"
-                else:
-                    reminder_type = "one_hour_before"
+    save_reminder(
+        event_id=event_id,
+        telegram_chat_id=telegram_chat_id,
+        remind_at=remind_at,
+        reminder_type=reminder_type,
+    )
 
-                remind_at = calculate_remind_at(event, reminder_type)
-
-                save_reminder(
-                    event_id=event_id,
-                    telegram_chat_id=telegram_chat_id,
-                    remind_at=remind_at,
-                    reminder_type=reminder_type,
-                )
-
-                reminder_created = True
-                clear_conversation_state(telegram_chat_id)
+    reminder_created = True
+    clear_conversation_state(telegram_chat_id)
 
             else:
                 set_conversation_state(
