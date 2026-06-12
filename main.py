@@ -46,7 +46,7 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip()
 
 CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", "300"))
 MAX_ITEMS_PER_SEARCH = int(os.getenv("MAX_ITEMS_PER_SEARCH", "50"))
-MIN_AI_SCORE_TO_SEND = int(os.getenv("MIN_AI_SCORE_TO_SEND", "3"))
+MIN_AI_SCORE_TO_SEND = int(os.getenv("MIN_AI_SCORE_TO_SEND", "2"))
 MIN_DEAL_SCORE_TO_SEND = int(os.getenv("MIN_DEAL_SCORE_TO_SEND", "0"))
 FEEDBACK_LEARNING_ENABLED = os.getenv("FEEDBACK_LEARNING_ENABLED", "true").lower() in ["1", "true", "yes", "y"]
 FEEDBACK_TYPES = {
@@ -62,9 +62,15 @@ FEEDBACK_TYPES = {
 DYNAMIC_AI_FILTERS_ENABLED = os.getenv("DYNAMIC_AI_FILTERS_ENABLED", "true").lower() in ["1", "true", "yes", "y"]
 FILTER_GENERATION_MODEL = os.getenv("FILTER_GENERATION_MODEL", GROQ_MODEL).strip()
 
+# v8 Simple Mode:
+# The old category filters became too strict and could silently skip good deals.
+# In Simple Mode, the database filter is mostly descriptive. The bot uses Vinted search + price + freshness,
+# then sends candidates to AI for scoring. Hard blocking is limited to clear accessory-only titles.
+SIMPLE_FILTER_MODE = os.getenv("SIMPLE_FILTER_MODE", "true").lower() in ["1", "true", "yes", "y"]
+
 
 # New freshness filter.
-ONLY_RECENT_MINUTES = int(os.getenv("ONLY_RECENT_MINUTES", "60"))
+ONLY_RECENT_MINUTES = int(os.getenv("ONLY_RECENT_MINUTES", "120"))
 
 # If Apify does not return age/date:
 # true  = skip item, safer, avoids old listings
@@ -687,6 +693,9 @@ def accessory_only_reason(raw: Dict[str, Any], profile: Dict[str, Any], search_k
 
 
 def passes_product_profile_filter(raw: Dict[str, Any], search_keyword: str) -> Tuple[bool, str]:
+    if SIMPLE_FILTER_MODE:
+        return True, "simple mode: legacy product filter bypassed"
+
     """
     Simpler product filter:
     - uses title + description + brand + raw text from Vinted
@@ -1368,7 +1377,59 @@ def sanitize_ai_filter(keyword: str, data: Dict[str, Any]) -> Dict[str, Any]:
 def fallback_filter(keyword: str, max_price: Optional[float]) -> Dict[str, Any]:
     return local_category_filter(keyword, max_price)
 
+def simple_mode_filter(keyword: str, max_price: Optional[float]) -> Dict[str, Any]:
+    """Very permissive v8 filter.
+
+    It avoids model/category overfitting. Vinted query brings candidates; AI deal scoring decides.
+    This is meant for testing and for learning via feedback buttons.
+    """
+    k = (keyword or "").lower().strip()
+    category = infer_query_category(k)
+    vq = keyword.strip() if keyword else ""
+
+    # Search queries should be broad enough to catch seller wording variants.
+    if "apple watch" in k and "se" in k:
+        vq = "apple watch se"
+    elif "apple watch" in k and ("series 10" in k or "watch 10" in k or re.search(r"\b10\b", k)):
+        vq = "apple watch 10"
+    elif "apple watch" in k and ("series 9" in k or "watch 9" in k or re.search(r"\b9\b", k)):
+        vq = "apple watch 9"
+    elif "ipad" in k and re.search(r"\b10\b|10gen|10 gen|10 generacji", k):
+        vq = "ipad 10"
+    elif "ipad" in k and re.search(r"\b11\b|11gen|11 gen|11 generacji", k):
+        vq = "ipad 11"
+    elif "redmi" in k and "pad" in k:
+        vq = "redmi pad"
+
+    return {
+        "product_category": category,
+        "vinted_query": vq,
+        "filter_summary_ua": "v8 Simple Mode: фільтр максимально широкий; бот майже не блокує оферти до AI-оцінки, щоб не пропускати хороші варіанти.",
+        "required_groups": [],
+        "include_any": [],
+        "reject_any": [
+            "samo pudełko", "samo pudelko", "tylko pudełko", "tylko pudelko",
+            "sam pasek", "tylko pasek", "sama ładowarka", "sama ladowarka",
+            "tylko ładowarka", "tylko ladowarka", "samo etui", "tylko etui",
+            "samo szkło", "samo szklo", "tylko szkło", "tylko szklo",
+            "same sznurówki", "same sznurowki", "tylko sznurówki", "tylko sznurowki"
+        ],
+        "wrong_product_any": [],
+        "quality_risk_any": [
+            "pasek", "bransoleta", "ładowarka", "ladowarka", "kabel", "pudełko", "pudelko",
+            "etui", "case", "szkło", "szklo", "folia", "ryski", "ślady użytkowania",
+            "uszkodzony", "pęknięty", "pekniety", "zbity", "nie działa", "nie dziala",
+            "blokada", "icloud", "apple id", "nie paruje", "digital crown", "kondycja baterii",
+            "podróbka", "podrobka", "fake", "replika", "braki", "niekompletne"
+        ],
+        "min_ai_score": MIN_AI_SCORE_TO_SEND,
+        "message_to_seller_pl": "Cześć, czy oferta jest aktualna i czy przedmiot jest w pełni sprawny? Czy można prosić o dodatkowe zdjęcia oraz potwierdzenie modelu/stanu?"
+    }
+
 def generate_filter_with_ai(keyword: str, max_price: Optional[float]) -> Dict[str, Any]:
+    if SIMPLE_FILTER_MODE:
+        return simple_mode_filter(keyword, max_price)
+
     if not DYNAMIC_AI_FILTERS_ENABLED:
         return fallback_filter(keyword, max_price)
 
@@ -1414,6 +1475,11 @@ def passes_dynamic_ai_filter(raw: Dict[str, Any], search: Dict[str, Any]) -> Tup
     accessory_reason = accessory_only_reason(raw, profile, search.get("keyword", ""))
     if accessory_reason:
         return False, accessory_reason
+
+    if SIMPLE_FILTER_MODE:
+        # Do not block by required_groups / wrong_product_any in Simple Mode.
+        # Vinted query + price + recency decide the candidate set; AI decides quality/deal score.
+        return True, "v8 simple mode: passed to AI scoring"
 
     # Hard-reject only clear wrong products and explicit reject words.
     # Single accessory words like pasek/ładowarka/pudełko are removed from hard rejects,
