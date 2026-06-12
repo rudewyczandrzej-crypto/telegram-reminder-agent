@@ -44,7 +44,7 @@ EMPTY_ALERT_THRESHOLD_CYCLES = int(os.getenv("EMPTY_ALERT_THRESHOLD_CYCLES", "3"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip()
 
-BOT_VERSION = "v10_no_silent_skip_2026_06_12"
+BOT_VERSION = "v11_price_parse_fix_2026_06_12"
 CATCH_ALL_MODE = os.getenv("CATCH_ALL_MODE", "true").lower() in ["1", "true", "yes", "y"]
 MIN_EFFECTIVE_RECENT_MINUTES = int(os.getenv("MIN_EFFECTIVE_RECENT_MINUTES", "360"))
 
@@ -322,11 +322,36 @@ def normalize_search_keyword(value: Any) -> str:
 
 
 def normalize_price(value: Any) -> Optional[float]:
+    """
+    Robust price parser for Vinted API/Supabase values.
+    Handles numbers, strings like "299,00 PLN", and dicts like {"amount": "299.0"}.
+    Important: a broken parser made item["price"] become None, then max_price filtering removed every offer.
+    """
     if value is None or value == "":
         return None
-    try:
+
+    if isinstance(value, (int, float)):
         return round(float(value), 2)
-    except (TypeError, ValueError):
+
+    if isinstance(value, dict):
+        for key in ["amount", "value", "price", "numeric"]:
+            if key in value and value[key] not in [None, ""]:
+                return normalize_price(value[key])
+        # Sometimes Vinted nests price deeper. Try the first simple value.
+        for v in value.values():
+            parsed = normalize_price(v)
+            if parsed is not None:
+                return parsed
+        return None
+
+    text = str(value).strip().replace(" ", "")
+    text = text.replace(",", ".")
+    match = re.search(r"(\d+(?:\.\d+)?)", text)
+    if not match:
+        return None
+    try:
+        return round(float(match.group(1)), 2)
+    except ValueError:
         return None
 
 
@@ -2126,11 +2151,26 @@ def fetch_vinted_items(keyword: str, max_price: Optional[float], search: Optiona
 
     normalized = [normalize_vinted_direct_item(item) for item in filtered_recent if isinstance(item, dict)]
 
+    before_price_filter = len(normalized)
+    skipped_price = 0
+    skipped_price_parse = 0
     if max_price:
-        normalized = [
-            item for item in normalized
-            if item["price"] is not None and item["price"] <= float(max_price)
-        ]
+        kept_by_price = []
+        for item in normalized:
+            if item.get("price") is None:
+                skipped_price_parse += 1
+                logger.info("Skipped item by price parse: title=%s raw_price=%s", item.get("title"), get_first_existing(item.get("raw", {}), ["price", "price_amount", "priceAmount", "amount"], ""))
+                continue
+            if item["price"] <= float(max_price):
+                kept_by_price.append(item)
+            else:
+                skipped_price += 1
+        normalized = kept_by_price
+
+    logger.info(
+        "Price filter: before=%s kept=%s skipped_price=%s skipped_price_parse=%s max_price=%s",
+        before_price_filter, len(normalized), skipped_price, skipped_price_parse, max_price
+    )
 
     return normalized
 
