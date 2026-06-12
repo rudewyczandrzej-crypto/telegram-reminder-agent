@@ -44,6 +44,10 @@ EMPTY_ALERT_THRESHOLD_CYCLES = int(os.getenv("EMPTY_ALERT_THRESHOLD_CYCLES", "3"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant").strip()
 
+BOT_VERSION = "v10_no_silent_skip_2026_06_12"
+CATCH_ALL_MODE = os.getenv("CATCH_ALL_MODE", "true").lower() in ["1", "true", "yes", "y"]
+MIN_EFFECTIVE_RECENT_MINUTES = int(os.getenv("MIN_EFFECTIVE_RECENT_MINUTES", "360"))
+
 CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", "300"))
 MAX_ITEMS_PER_SEARCH = int(os.getenv("MAX_ITEMS_PER_SEARCH", "50"))
 MIN_AI_SCORE_TO_SEND = int(os.getenv("MIN_AI_SCORE_TO_SEND", "2"))
@@ -75,8 +79,10 @@ BROAD_SEARCH_MODE = os.getenv("BROAD_SEARCH_MODE", "true").lower() in ["1", "tru
 MAX_QUERY_VARIANTS = int(os.getenv("MAX_QUERY_VARIANTS", "5"))
 
 
-# New freshness filter.
-ONLY_RECENT_MINUTES = int(os.getenv("ONLY_RECENT_MINUTES", "360"))
+# Freshness filter. In catch-all mode, old Railway variables like ONLY_RECENT_MINUTES=60
+# are not allowed to make the bot too narrow again.
+ONLY_RECENT_MINUTES_RAW = int(os.getenv("ONLY_RECENT_MINUTES", "360"))
+ONLY_RECENT_MINUTES = max(ONLY_RECENT_MINUTES_RAW, MIN_EFFECTIVE_RECENT_MINUTES) if CATCH_ALL_MODE else ONLY_RECENT_MINUTES_RAW
 
 # If Apify does not return age/date:
 # true  = skip item, safer, avoids old listings
@@ -2333,8 +2339,12 @@ async def process_search(
                 await application.bot.send_message(
                     chat_id=telegram_id,
                     text=(
-                        f"Нічого свіжого не знайшов по пошуку: {keyword}\n"
-                        f"Фільтр: останні {ONLY_RECENT_MINUTES} хв, max items: {MAX_ITEMS_PER_SEARCH}. Якщо Vinted не віддав час — newest_first."
+                        f"Нічого не дійшло до відправки по пошуку: {keyword}\n"
+                        f"Версія: {BOT_VERSION}\n"
+                        f"CATCH_ALL_MODE: {CATCH_ALL_MODE}, SIMPLE_FILTER_MODE: {SIMPLE_FILTER_MODE}, BROAD_SEARCH_MODE: {BROAD_SEARCH_MODE}\n"
+                        f"Вікно: {ONLY_RECENT_MINUTES} хв (Railway raw: {ONLY_RECENT_MINUTES_RAW}), max items: {MAX_ITEMS_PER_SEARCH}\n"
+                        f"Варіанти Vinted-запиту: {', '.join(build_vinted_query_variants(search))}\n"
+                        f"Перевір детально: /debugsearch {search_id}"
                     ),
                 )
             return 0
@@ -2351,7 +2361,12 @@ async def process_search(
             ai = evaluate_item_with_ai(item, search)
             score = int(ai.get("score", 0))
             deal_score = int(ai.get("deal_score", 0))
-            min_score = int(search.get("min_ai_score") or get_filter_profile(search).get("min_ai_score") or MIN_AI_SCORE_TO_SEND)
+            # In catch-all/simple mode, old DB filters may contain min_ai_score=3/4 from older strict patches.
+            # Do not let old database records silently block offers.
+            if CATCH_ALL_MODE or SIMPLE_FILTER_MODE:
+                min_score = MIN_AI_SCORE_TO_SEND
+            else:
+                min_score = int(search.get("min_ai_score") or get_filter_profile(search).get("min_ai_score") or MIN_AI_SCORE_TO_SEND)
 
             if score < min_score:
                 logger.info("Skipped low AI score item WITHOUT marking sent: %s score=%s min=%s", item.get("title"), score, min_score)
@@ -2733,7 +2748,7 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await message.reply_text("У тебе немає активних пошуків. Додай: /add ipad до 1200")
         return
 
-    await message.reply_text(f"🔍 Перевіряю Vinted. Вікно свіжості: останні {ONLY_RECENT_MINUTES} хв. Беру до {MAX_ITEMS_PER_SEARCH} оголошень на пошук...")
+    await message.reply_text(f"🔍 Перевіряю Vinted. Версія: {BOT_VERSION}\nВікно: останні {ONLY_RECENT_MINUTES} хв (Railway raw: {ONLY_RECENT_MINUTES_RAW}). Беру до {MAX_ITEMS_PER_SEARCH} оголошень на варіант. Broad search: {BROAD_SEARCH_MODE}")
 
     total_sent = 0
 
@@ -2745,6 +2760,29 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await message.reply_text("Поки не знайшов нових нормальних свіжих оферт.")
     else:
         await message.reply_text(f"✅ Готово. Нових оферт: {total_sent}")
+
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.message
+    if not message:
+        return
+    text = f"""🩺 <b>Vinted bot status</b>
+Версія: <code>{escape(BOT_VERSION)}</code>
+CATCH_ALL_MODE: <code>{CATCH_ALL_MODE}</code>
+SIMPLE_FILTER_MODE: <code>{SIMPLE_FILTER_MODE}</code>
+BROAD_SEARCH_MODE: <code>{BROAD_SEARCH_MODE}</code>
+MAX_QUERY_VARIANTS: <code>{MAX_QUERY_VARIANTS}</code>
+ONLY_RECENT_MINUTES raw Railway: <code>{ONLY_RECENT_MINUTES_RAW}</code>
+ONLY_RECENT_MINUTES effective: <code>{ONLY_RECENT_MINUTES}</code>
+MIN_AI_SCORE_TO_SEND: <code>{MIN_AI_SCORE_TO_SEND}</code>
+MIN_DEAL_SCORE_TO_SEND: <code>{MIN_DEAL_SCORE_TO_SEND}</code>
+MAX_ITEMS_PER_SEARCH: <code>{MAX_ITEMS_PER_SEARCH}</code>
+SKIP_UNKNOWN_AGE: <code>{SKIP_UNKNOWN_AGE}</code>
+REJECT_BAD_CONDITIONS: <code>{REJECT_BAD_CONDITIONS}</code>
+
+Якщо raw=60, але effective=360 — це нормально: v10 перекрив стару Railway-змінну, щоб бот не пропускав офери.
+"""
+    await message.reply_text(text.strip(), parse_mode=ParseMode.HTML)
 
 
 async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2820,15 +2858,15 @@ async def debugsearch_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyword = str(search.get("vinted_query") or search.get("keyword") or "").strip()
     max_price = search.get("max_price")
 
-    await message.reply_text(f"🔬 Діагностика #{search.get('id')}: {keyword}\nБеру raw items з Vinted і показую, що бот з ними робить.")
+    await message.reply_text(f"🔬 Діагностика #{search.get('id')}: {keyword}\nВерсія: {BOT_VERSION}\nВаріанти: {', '.join(build_vinted_query_variants(search))}\nБеру raw items з Vinted і показую, що бот з ними робить.")
 
     try:
-        raw_items = direct_vinted_request(keyword, max_price)
+        raw_items, used_queries = direct_vinted_multi_request(search, max_price)
         if not raw_items:
             await message.reply_text("Vinted повернув 0 raw items. Можливо, Vinted API тимчасово не віддає результати або запит занадто вузький.")
             return
 
-        lines = [f"🔬 <b>Debug search #{escape(search.get('id'))}</b>", f"Raw items: {len(raw_items)}", ""]
+        lines = [f"🔬 <b>Debug search #{escape(search.get('id'))}</b>", f"Версія: {escape(BOT_VERSION)}", f"Варіанти: {escape(', '.join(used_queries))}", f"Raw merged items: {len(raw_items)}", f"Вікно: {ONLY_RECENT_MINUTES} хв (raw {ONLY_RECENT_MINUTES_RAW})", ""]
         for idx, raw in enumerate(raw_items[:10], start=1):
             if not isinstance(raw, dict):
                 continue
@@ -3097,6 +3135,7 @@ def main() -> None:
     application.add_handler(CommandHandler("delete", delete_command))
     application.add_handler(CommandHandler("clear", clear_command))
     application.add_handler(CommandHandler("check", check_command))
+    application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("filter", filter_command))
     application.add_handler(CommandHandler("refreshfilter", refreshfilter_command))
     application.add_handler(CommandHandler("debug", debug_command))
@@ -3111,7 +3150,7 @@ def main() -> None:
     )
 
     init_vinted_session()
-    logger.info("Bot started in DIRECT VINTED mode. Freshness filter: ONLY_RECENT_MINUTES=%s SKIP_UNKNOWN_AGE=%s", ONLY_RECENT_MINUTES, SKIP_UNKNOWN_AGE)
+    logger.info("Bot started. version=%s CATCH_ALL_MODE=%s BROAD_SEARCH_MODE=%s ONLY_RECENT_RAW=%s ONLY_RECENT_EFFECTIVE=%s SKIP_UNKNOWN_AGE=%s", BOT_VERSION, CATCH_ALL_MODE, BROAD_SEARCH_MODE, ONLY_RECENT_MINUTES_RAW, ONLY_RECENT_MINUTES, SKIP_UNKNOWN_AGE)
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
