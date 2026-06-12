@@ -67,10 +67,16 @@ FILTER_GENERATION_MODEL = os.getenv("FILTER_GENERATION_MODEL", GROQ_MODEL).strip
 # In Simple Mode, the database filter is mostly descriptive. The bot uses Vinted search + price + freshness,
 # then sends candidates to AI for scoring. Hard blocking is limited to clear accessory-only titles.
 SIMPLE_FILTER_MODE = os.getenv("SIMPLE_FILTER_MODE", "true").lower() in ["1", "true", "yes", "y"]
+# v9 Broad Search Mode:
+# Vinted search_text can miss good offers when the query is too exact, e.g.
+# "apple watch se 2" may not catch "Apple Watch SE (gen 2)".
+# This mode queries a few broad variants and lets AI/deal score decide.
+BROAD_SEARCH_MODE = os.getenv("BROAD_SEARCH_MODE", "true").lower() in ["1", "true", "yes", "y"]
+MAX_QUERY_VARIANTS = int(os.getenv("MAX_QUERY_VARIANTS", "5"))
 
 
 # New freshness filter.
-ONLY_RECENT_MINUTES = int(os.getenv("ONLY_RECENT_MINUTES", "120"))
+ONLY_RECENT_MINUTES = int(os.getenv("ONLY_RECENT_MINUTES", "360"))
 
 # If Apify does not return age/date:
 # true  = skip item, safer, avoids old listings
@@ -845,6 +851,7 @@ def normalize_item(raw: Dict[str, Any]) -> Dict[str, Any]:
         "images": images,
         "age_minutes": age_minutes,
         "age_source": age_source,
+        "query_used": str(raw.get("_vinted_query_used", "")),
         "raw": raw,
     }
 
@@ -1797,6 +1804,135 @@ def detect_vinted_block(response: requests.Response) -> Optional[str]:
     return None
 
 
+
+
+def compact_query(q: str) -> str:
+    q = re.sub(r"[^\w\sąćęłńóśźżĄĆĘŁŃÓŚŹŻ.-]+", " ", str(q or "").lower())
+    q = re.sub(r"\s+", " ", q).strip()
+    return q
+
+
+def build_vinted_query_variants(active_search: Dict[str, Any]) -> List[str]:
+    """
+    Build a few Vinted search_text variants.
+    Important: Vinted text search can be narrower than the app UI. If we query only
+    one exact string, good offers can be invisible to the bot before any AI filter runs.
+    """
+    base = compact_query(active_search.get("vinted_query") or active_search.get("keyword") or "")
+    original = compact_query(active_search.get("keyword") or "")
+    queries: List[str] = []
+
+    def add(q: str) -> None:
+        q = compact_query(q)
+        if q and q not in queries:
+            queries.append(q)
+
+    add(base)
+    add(original)
+
+    text = f"{base} {original}".lower()
+
+    # Apple Watch variants. Use broad query first so Vinted can return seller spelling variants.
+    if "apple" in text and "watch" in text:
+        if "se" in text:
+            add("apple watch se")
+            add("apple watch se 2")
+            add("apple watch gen 2")
+            add("apple watch")
+        elif "10" in text or "series 10" in text or "s10" in text:
+            add("apple watch series 10")
+            add("apple watch 10")
+            add("apple watch")
+        elif "9" in text or "series 9" in text or "s9" in text:
+            add("apple watch series 9")
+            add("apple watch 9")
+            add("apple watch")
+        else:
+            add("apple watch")
+
+    # iPad variants. Broad iPad catches titles like "iPad 2022 10.9 256GB".
+    if "ipad" in text or "i pad" in text:
+        if "10" in text or "2022" in text:
+            add("ipad 10")
+            add("ipad 2022")
+            add("ipad 10.9")
+            add("ipad")
+        elif "11" in text or "2025" in text or "a16" in text:
+            add("ipad 11")
+            add("ipad a16")
+            add("ipad 2025")
+            add("ipad")
+        else:
+            add("ipad")
+
+    # Redmi Pad variants.
+    if "redmi" in text and "pad" in text:
+        add("redmi pad")
+        add("redmi pad pro")
+        add("xiaomi redmi pad")
+
+    # Footwear / sneakers.
+    if "nike" in text and "dunk" in text:
+        add("nike dunk low" if "low" in text else "nike dunk")
+        add("nike dunk")
+    if "jordan" in text:
+        add("air jordan")
+        add("jordan")
+
+    # Collectibles.
+    if "funko" in text or "pop" in text:
+        add("funko pop")
+        if original and original != "funko pop":
+            add(original)
+    if "lego" in text:
+        add("lego")
+
+    # Generic broad fallback: first 2-3 meaningful words without price-like tokens.
+    tokens = [t for t in re.split(r"\s+", original or base) if t and not re.fullmatch(r"\d{2,5}", t) and t not in {"do", "zl", "zł", "pln"}]
+    if len(tokens) >= 2:
+        add(" ".join(tokens[:3]))
+        add(" ".join(tokens[:2]))
+
+    if not BROAD_SEARCH_MODE:
+        return queries[:1]
+
+    return queries[:max(1, MAX_QUERY_VARIANTS)]
+
+
+def direct_vinted_multi_request(active_search: Dict[str, Any], max_price: Optional[float]) -> Tuple[List[Dict[str, Any]], List[str]]:
+    variants = build_vinted_query_variants(active_search)
+    merged: List[Dict[str, Any]] = []
+    seen: set = set()
+    errors: List[str] = []
+
+    for q in variants:
+        try:
+            raw_items = direct_vinted_request(q, max_price)
+        except VintedFetchError as e:
+            errors.append(f"{q}: {e.kind}")
+            logger.warning("Vinted query variant failed: %s -> %s %s", q, e.kind, e.message)
+            continue
+
+        logger.info("Vinted query variant '%s' returned %s raw items", q, len(raw_items))
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            item_id = str(get_first_existing(item, ["id", "item_id", "url"], ""))
+            if not item_id:
+                title = str(get_first_existing(item, ["title", "name"], ""))
+                price = str(get_first_existing(item, ["price", "price_amount"], ""))
+                item_id = f"{title}|{price}"
+            if item_id in seen:
+                continue
+            seen.add(item_id)
+            item["_vinted_query_used"] = q
+            merged.append(item)
+
+    if not merged and errors:
+        raise VintedFetchError("all_query_variants_failed", "; ".join(errors[:8]))
+
+    return merged, variants
+
 def direct_vinted_request(keyword: str, max_price: Optional[float]) -> List[Dict[str, Any]]:
     endpoint = f"{VINTED_BASE_URL}/api/v2/catalog/items"
     params = build_vinted_params(keyword, max_price)
@@ -1929,14 +2065,19 @@ def normalize_vinted_direct_item(raw: Dict[str, Any]) -> Dict[str, Any]:
         "images": images,
         "age_minutes": age_minutes,
         "age_source": age_source,
+        "query_used": str(raw.get("_vinted_query_used", "")),
         "raw": raw,
     }
 
 
 def fetch_vinted_items(keyword: str, max_price: Optional[float], search: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     active_search = search or {"keyword": keyword, "max_price": max_price}
-    vinted_query = str(active_search.get("vinted_query") or keyword).strip() or keyword
-    raw_items = direct_vinted_request(vinted_query, max_price)
+
+    # v9: fetch multiple broad Vinted query variants.
+    # This fixes the main issue where a perfect offer exists in the app,
+    # but the exact API search_text does not return it.
+    raw_items, used_queries = direct_vinted_multi_request(active_search, max_price)
+    logger.info("Broad Vinted search variants used: %s; merged raw items=%s", used_queries, len(raw_items))
 
     filtered_recent = []
     skipped_old = 0
@@ -2436,6 +2577,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 7. Перегенерувати AI-фільтр:
 <code>/refreshfilter 3</code>
 <code>/debugsearch 3</code> — показати, чому останні raw-офери проходять або відсікаються
+
+<b>v9 Broad Search:</b> бот шукає кількома варіантами запиту, наприклад apple watch se 2 + apple watch se + apple watch, щоб не пропускати різні написання продавців.
 
 8. Тест Vinted direct:
 <code>/debug ipad</code>
